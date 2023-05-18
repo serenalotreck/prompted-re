@@ -1,0 +1,1 @@
+Extract the biological relations from the following text as (Subject, Predicate, Object) triples in the format ("Subject", "predicate", "Object"): 

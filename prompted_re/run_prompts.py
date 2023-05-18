@@ -10,7 +10,63 @@ from transformers import pipeline
 import yaml
 
 
-def format_prompt_make_pred(pipe, dset_split, yaml_data,
+def save_preds(full_dset, out_loc, out_prefix):
+    """
+    Save the predictions as a json.
+
+    parameters:
+        full_dset, DatasetDict: dataset with preds
+        out_loc, str: lcoation to save
+        out_prefix, str: string to prepend to outputs
+
+    returns:
+        save_names, list of str: full paths to saved files
+    """
+    save_names = []
+    for split, dset in full_dset.items():
+        dset_preds = dset['preds']
+        dset_pmids = dset['pmid'] ## TODO generalize
+        out_dict = {k:v for k,v in zip(dset_pmids, dset_preds)}
+        out_name = f'{out_loc}/{out_prefix}_{split}_{predictions}.json'
+        save_names.append(out_name)
+        with open(out_name) as myf:
+            json.dump(out_dict, myf)
+
+    return save_names
+
+
+def evaluate_preds(full_dset, out_loc, out_prefix):
+    """
+    Evaluate and save model predictions.
+
+    parameters:
+        full_dset, DatasetDict: dataset with preds
+        out_loc, str: lcoation to save
+        out_prefix, str: string to prepend to outputs
+
+    returns:
+        eval_name, str: path to saved file
+    """
+    eval_dict = {}
+    for split, dset in full_dset.items():
+        ## TODO implement eval
+        pass
+    # Make df from eval_dict
+    # Save df
+    # Return the save name
+
+
+def format_preds(response):
+    """
+    Extract triples from a given pipe response.
+
+    parameters:
+        response, list of dict: responses from text-generation pipeline object
+    """
+    print(response)
+
+
+def format_prompt_make_pred(pipe, dset_split, yaml_data, prompt,
                             fewshot_example_dict=None):
     """
     For each document in a given split, format the prompt and pass to the LLM
@@ -20,28 +76,47 @@ def format_prompt_make_pred(pipe, dset_split, yaml_data,
         pipe, HuggingFace TextGenerationPipeline: pipeline with model
         dset_split, Huggingface Dataset: splt of the dataset to use
         yaml_data, dict: dictionary of special token and context prompt to use
+        prompt, str: Prompt to use. Should be formatted to that the target text
+            can be directly appended to the string.
         fewshot_example_dict, dict: keys are 'input' and 'output', values are
             lists containing input and output pairs at corresponding indices,
             None if no file was passed
 
     returns:
-        preds, <dtype>: Model predictions
+        None, modifies dataset in place to add predictions
     """
     # Format fewshot examples if there are any
     if fewshot_example_dict is not None:
         examples = yaml_data['context']
         for inp, out in zip(fewshot_example_dict['input'], fewshot_example_dict['output']):
             examp_str = yaml_data['turn_template']
-            examp_str.replace('user', yaml_data['user'])
-            examp_str.replace('user-message', inp)
-            examp_str.replace('bot', yaml_data['bot'])
-            examp_str.replace('bot-message', out)
+            examp_str.replace('<|user|>', yaml_data['user'])
+            examp_str.replace('<|user-message|>', inp)
+            examp_str.replace('<|bot|>', yaml_data['bot'])
+            examp_str.replace('<|bot-message|>', out)
             examples += examp_str
 
     # For each document
+    preds = []
     for doc in dset_split:
-        # Add 
-        
+        # Add one more user prompt and the doc text
+        final_str = yaml_data['turn_template']
+        bot_msg_idx = final_str.index('<|bot-message|>')
+        final_str = final_str[:bot_msg_idx]
+        final_str.replace('<|user|>', yaml_data['user'])
+        final_str.replace('<|user-message|>', prompt + doc['text'])
+        final_str.replace('<|bot|>', yaml_data['bot'])
+        # Pass to the pipeline
+        response = pipe(final_str, num_return_sequences=1, do_sample=True,
+                        return_full_text=False)
+        # Format the output
+        doc_preds = format_preds(response)
+        # Append to predictions
+        preds.append(doc_preds)
+
+    # Add to dataset
+    dset_split.add_column('preds', preds)
+
 
 def get_chemprot_trips(doc):
     """
@@ -91,16 +166,26 @@ def process_dset(full_dset, dataset):
                 full_dset[split].add_column('trips', trip_col)
 
 
-def main(model, dataset, special_yaml, out_loc, out_prefix, fewshot_examples,
-            verbose):
+def main(model, dataset, prompt_path, special_yaml, out_loc, out_prefix,
+        fewshot_examples, gpu, verbose):
 
-    # Load the dataset and the model
+    # Load the dataset
     verboseprint('\nLoading in dataset...')
     full_dset = load_dataset(dataset)
     verboseprint(f'Dataset {dataset} contains the following splits: '
                 f'{full_dset.keys()}')
-    vseboseprint('\nLoading in the model as a text generation pipeline...')
-    pipe = pipeline('text-generation', model=model)
+
+    # Load in the model
+    verboseprint('\nLoading in the model as a text generation pipeline...')
+    gpu = 0 if gpu else -1
+    pipe = pipeline('text-generation', model=model, device=gpu)
+
+    # Load in the prompt
+    verbosprint('\nLoading in the prompt file...')
+    with open(prompt_path) as myf:
+        prompt = myf.read()
+    print_len = min(len(prompt), 50)
+    verboseprint(f'Snapshot of the loaded prompt: {prompt[:print_len]}')
 
     # Load the yaml and the fewshot examples
     verboseprint('\nLoading in the special token and context prompt yaml...')
@@ -118,15 +203,24 @@ def main(model, dataset, special_yaml, out_loc, out_prefix, fewshot_examples,
     # Format prompts and make predictions with LLM
     verboseprint('\nFormatting prompts and getting predictions...')
     for split in full_dset.keys():
-        if split != 'sample':
-            verbosprint(f'On split {split}...')
-            preds = format_prompt_make_pred(pipe, full_dset[split], yaml_data,
+        verbosprint(f'On split {split}...')
+        format_prompt_make_pred(pipe, full_dset[split], yaml_data, prompt,
                                             fewshot_example_dict)
 
     # Evaluate predictions
+    verboseprint('\nEvaluating predictions....')
+    eval_name = evaluate_preds(full_dset, out_loc, out_prefix)
+    verboseprint(f'Evaluations have been saved to {eval_name}')
 
-    # Save predictions and results
-    
+    # Save predictions
+    verboseprint('\nSaving predictions...')
+    save_names = save_preds(full_dset, out_loc, out_prefix)
+    save_names = [basename(n) for n in save_names]
+    verboseprint(f'Evaluations have been saved to the directory {out_loc}, '
+                f'with the filenames {", ".join(save_names)}')
+
+    verboseprint('\nDone!')
+
 
 if __name__ == "__main__":
 
@@ -136,6 +230,8 @@ if __name__ == "__main__":
             help='huggingface model string to test')
     parser.add_argument('dataset', type=str,
             help='huggingface dataset string to test against')
+    parser.add_argument('prompt_path', type=str,
+            help='Path to a txt file containing the prompt string')
     parser.add_argument('special_yaml', type=str,
             help='Path to yaml file that specifies special tokens and context '
             'prompt for the given model')
@@ -145,11 +241,14 @@ if __name__ == "__main__":
             help='String to prepend to output files')
     parser.add_argument('-fewshot_examples', type=str,
             help='Path to a file containing fewshot input/output examples')
+    parser.add_argument('--gpu', action='store_true',
+            help='Whether or not a GPU is available to run the models')
     parser.add_argument('--verbose', '-v', action='store_true',
             help='Whether or not to print updates')
 
     args = parser.parse_args()
 
+    args.prompt_path = abspath(args.prompt_path)
     args.special_yaml = abspath(args.special_yaml)
     args.out_loc = abspath(args.out_loc)
     if args.fewshot_examples is not None:
