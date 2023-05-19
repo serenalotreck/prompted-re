@@ -50,14 +50,14 @@ def check_rels_symmetrically(pred_df, gold_df, check_rels):
     if check_rels:
         onlist = ['E1', 'R', 'E2']
     else:
-        onlist = ['E1', 'E2'
+        onlist = ['E1', 'E2']
 
     # Check in both directions
-    dir1_matches = pd.merge(gold_df, pred_df, how='inner', on=['E1', 'R', 'E2'])
+    dir1_matches = pd.merge(gold_df, pred_df, how='inner', on=onlist)
 
     # Swap preds df and check again
-    pred_rev = pred.iloc[:, ::-1].rename(columns={'E1':'E2', 'E2':'E1'})
-    dir2_matches = pd.merge(gold_df, pred_rev, how='inner', on=['E1', 'R', 'E2'])
+    pred_rev = pred_df.iloc[:, ::-1].rename(columns={'E1':'E2', 'E2':'E1'})
+    dir2_matches = pd.merge(gold_df, pred_rev, how='inner', on=onlist)
 
     # Get numbers
     tp = len(dir1_matches) + len(dir2_matches)
@@ -65,6 +65,36 @@ def check_rels_symmetrically(pred_df, gold_df, check_rels):
     fn = len(gold_df) - tp
 
     return tp, fp, fn
+
+def symmetric_drop(df):
+    """
+    Drop rows for suplicates including symmetrically reversed rows. Considers
+    relation type; this is designed to get rid of true duplicates, not
+    artificial duplicates introduced by not considering relation types.
+
+    parameters:
+        df, pandas df: df from which to drop duplicates
+
+    returns:
+        dropped_df, pandas df: updated df
+    """
+    # Make a column with the sorted row as a column
+    df['sorted_row'] = [sorted([a, b, c]) for a, b, c in zip(
+                                                df['E1'], df['R'], df['E2'])]
+
+    # Turn the new column into a string
+    df['sorted_row'] = df['sorted_row'].astype(str)
+
+    # Drop duplicates
+    dropped_df = df.drop_duplicates(subset=['sorted_row'])
+
+    # Drop the additional row
+    dropped_df = dropped_df.drop(columns='sorted_row')
+
+    # Reset index
+    dropped_df = dropped_df.reset_index(drop=True)
+
+    return dropped_df
 
 
 def dedup_trip_df(df, check_rels, sym_rels):
@@ -82,29 +112,25 @@ def dedup_trip_df(df, check_rels, sym_rels):
         deduped_df, padnas df: deduplicated df
     """
     # Get reltypes and check if they're all symmetrical
-    rel_types = gold_df['R'].unique()
+    rel_types = df['R'].unique()
     in_sym = [r in sym_rels for r in rel_types]
     # If we don't care about order or all rels are symmetric
-    if not check_rels or in_sym.all():
-        deduped_df = pd.DataFrame(
-            np.sort(df.values, axis=1),
-            index=df.index,
-            columns=df.columns).drop_duplicates()
+    if not check_rels or all(in_sym):
+        deduped_df = symmetric_drop(df)
     # If there are any rels that are not symmetric, go through by rel type
     else:
         deduped_df_list = []
         for rel_type in rel_types:
-            df_sub = df[df['R'] == rel_type]
+            df_sub = df[df['R'] == rel_type].copy(deep=True)
             if rel_type in sym_rels:
-                deduped_df_sub = pd.DataFrame(
-                    np.sort(df.values, axis=1),
-                    index=df.index,
-                    columns=df.columns).drop_duplicates()
+                deduped_df_sub = symmetric_drop(df_sub)
                 deduped_df_list.append(deduped_df_sub)
             else:
-                deduped_df_sub = df.drop_duplicates()
+                deduped_df_sub = df_sub.drop_duplicates()
                 deduped_df_list.append(deduped_df_sub)
         deduped_df = pd.concat(deduped_df_list)
+        deduped_df = deduped_df.reset_index(drop=True)
+        
 
     return deduped_df
 
@@ -128,7 +154,7 @@ def get_f1_input(preds, gold, check_rels=True, sym_rels=None):
         fn, int: number of false negatives
     """
     # Get sym_rels as a list if it was None
-    sym_rels = sym_rels if sym_rels is not None else []
+    sym_rels = [s.lower() for s in sym_rels] if sym_rels is not None else []
 
     # Make triple dataframes
     pred_df = pd.DataFrame(np.array(preds), columns=['E1', 'R', 'E2'])
@@ -137,26 +163,33 @@ def get_f1_input(preds, gold, check_rels=True, sym_rels=None):
     # Lowercase everything and strip leading/training whitespace
     for col_name in ['E1', 'R', 'E2']:
         pred_df[col_name] = pred_df[col_name].str.lower().str.strip()
-        gold_df[col_name] = pred_df[col_name].str.lower().str.strip()
+        gold_df[col_name] = gold_df[col_name].str.lower().str.strip()
 
     # Deduplicate
     orig_lens = [len(pred_df), len(gold_df)]
-    pred_df = dedup_trip_df(pred_df, check_rels, sym_labs)
-    gold_df = dedup_trip_df(gold_df, check_rels, sym_labs)
-    print(f'After deduplication, there are {len(orig_lens[0]) - len(pred_df)} '
-          f'fewer predicted triples, and {len(orig_lens[1]) - len(gold_df)} '
+    pred_df = dedup_trip_df(pred_df, check_rels, sym_rels)
+    gold_df = dedup_trip_df(gold_df, check_rels, sym_rels)
+    print(f'After deduplication, there are {orig_lens[0] - len(pred_df)} '
+          f'fewer predicted triples, and {orig_lens[1] - len(gold_df)} '
           'fewer triples in the gold standard.')
 
     # Check whether we have to go yb rel label or if we can do them all together
-    tp, fp, fn = 0
+    tp, fp, fn = [0, 0, 0]
     rel_types = gold_df['R'].unique()
     in_sym = [r in sym_rels for r in rel_types]
     # If we don't care about relation label, can do the entire thing at once:
     if not check_rels:
-        tp, fp, fn += check_rels_symmetrically(pred_sub, gold_sub, check_rels)
+        new_tp, new_fp, new_fn = check_rels_symmetrically(pred_df, gold_df, check_rels)
+        tp += new_tp
+        fp += new_fp
+        fn += new_fn
     # We also can do everything at once if all relation types are symmetrical
-    elif in_sym.all():
-        tp, fp, fn += check_rels_symmetrically(pred_sub, gold_sub, check_rels)
+    elif all(in_sym):
+        print('inside all sym')
+        new_tp, new_fp, new_fn = check_rels_symmetrically(pred_df, gold_df, check_rels)
+        tp += new_tp
+        fp += new_fp
+        fn += new_fn
     # Otherwise, we have to subset by type and perform operations on each subset
     else:
         for rel_type in rel_types:
@@ -165,9 +198,15 @@ def get_f1_input(preds, gold, check_rels=True, sym_rels=None):
             gold_sub = gold_df.loc[gold_df['R'] == rel_type]
             # Check if the rel type we're on is symmetrical
             if rel_type in sym_rels:
-                tp, fp, fn += check_rels_symmetrically(pred_sub, gold_sub, check_rels)
+                new_tp, new_fp, new_fn = check_rels_symmetrically(pred_sub, gold_sub, check_rels)
+                tp += new_tp
+                fp += new_fp
+                fn += new_fn
             else:
-                tp, fp, fn += check_rels_asymmetrically(pred_sub, gold_sub)
+                new_tp, new_fp, new_fn = check_rels_asymmetrically(pred_sub, gold_sub)
+                tp += new_tp
+                fp += new_fp
+                fn += new_fn
 
     return tp, fp, fn
 
