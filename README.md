@@ -18,3 +18,16 @@ The intention of this codebase is to allow for evaluation of any suitable model 
 Eventually, we would like to be able to evaluate prompts of an arbitrary number of steps. For the moment, however, we are only able to accept prompts that make a single request, with an arbitrary number of fewshot input/output examples. Examples of the kinds of prompts currently accepted can be found in `re_prompts`.
 
 ## Fewshot Examples
+
+## Evaluation configuration
+In order to evaluate the models, a `json` file with several keys is required. An example of a valid evaluation configuration file is:
+
+```
+{
+  "bootstrap": "True",
+  "boostrap_iters": 1000,
+  "check_rels": "True",
+  "sym_rels": "['interacts']"
+}
+```
+where `bootstrap` is whether or not to perform bootstrapping to get a confidence interval around the performance estimates, `bootstrap_iters` is the number of iterations to perform (will be ignored if `bootstrap` is `False`, but has to be provided), `check_rels` is whether or not to consider relation labels in evaluation, and `sym_rels` is a list of relation types that should be treated as symmetric.

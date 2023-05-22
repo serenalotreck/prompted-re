@@ -5,6 +5,17 @@ Author: Serena G. Lotreck
 """
 import numpy as np
 import pandas as pd
+import scipy.stats as st
+
+
+def safe_div(num, denom):
+    """
+    Function from https://www.github.com/dwadden/dygiepp/dygie/training/f1.py
+    """
+    if denom > 0:
+        return num / denom
+    else:
+        return 0
 
 
 def check_rels_asymmetrically(pred_df, gold_df):
@@ -109,7 +120,7 @@ def dedup_trip_df(df, check_rels, sym_rels):
             order-agnostically, default is None
 
     returns:
-        deduped_df, padnas df: deduplicated df
+        deduped_df, pandas df: deduplicated df
     """
     # Get reltypes and check if they're all symmetrical
     rel_types = df['R'].unique()
@@ -211,7 +222,100 @@ def get_f1_input(preds, gold, check_rels=True, sym_rels=None):
     return tp, fp, fn
 
 
+def calculate_f1(preds, gold, check_rels=True, sym_rels=None):
+    """
+    Calculate F1 score.
 
+    parameters:
+        preds, list of list of str: predicted triples
+        gold, list of list of str: gold triples
+        check_rels, bool: whether or not to consider the identity of relation
+            labels, default is True
+        sym_rels, list of str: list of relations that should be evaluated
+            order-agnostically, default is None
+
+    returns:
+        f1, float: F1 score for the provided sample
+    """
+    # Get tp/fp/fn counts
+    tp, fp, fn = get_f1_input(preds, gold, check_rels=True, sym_rels=None)
+
+    # Add to get f1 inputs
+    predicted = tp + fp
+    gold = tp + fn
+    matched = tp
+
+    # Calculate F1
+    precision = safe_div(matched, predicted)
+    recall = safe_div(matched, gold)
+    f1 = safe_div(2 * precision * recall, precision + recall)
+
+    return f1
+    
+
+def calculate_performance(dset_split, boostrap=True, boostrap_iters=500,
+                            check_rels=True, sym_rels=None):
+    """
+    Compute the F1 score of a model on a given dataset. For test sets with fewer
+    than 30 documents, uses the t distribution, and for larger than 30 documents,
+    uses the normal distribution.
+
+    parameters:
+        dset_split, Huggingface Dataset: a single split of a dataset, with
+            correctly formatted prediction and gold standard columns named
+            'preds' and 'trips' respectively.
+        bootstrap, bool: whether or not to bootstrap performance estimate,
+            default is True
+        boostrap_iters, int: how many bootstrap samples to pull, default is 500
+        check_rels, bool: whether or not to consider relation label identity,
+            default is True
+        sym_rels, list of str: relations to treat as symmetric, default is None
+
+    return:
+        f1_mean, float: F1 score
+        CI, tuple of float or None: CI if bootstrap=True, else None
+    """
+    # Turn dataset into a dataframe to make sampling easier
+    dset_df = pd.DataFrame(dset_split)
+
+    # Bootstrap
+    if bootstrap:
+        sample_f1s = []
+        for i in range(bootstrap_iters):
+            # Draw sample
+            sample = dset_df.sample(n=len(dset_df), replace=True)
+            # Compute statistic on sample
+            # This gets a separate F1 for each document
+            sample_f1 = dset_df.apply(lambda row: calculate_f1(row['preds'],
+                                            row['trips'], check_rels=check_rels,
+                                            sym_rels=sym_rels), axis=1)
+            # Average the F1 for this sample
+            sample_f1 = np.mean(sample_f1)
+            # Add to the sample list
+            sample_f1s.append(sample_f1)
+        # Generate the CI for this metric
+        if len(sample_f1s) <= 30:
+            CI = st.t.interval(alpha=0.95, df=len(sample_f1s)-1,
+              loc=np.mean(sample_f1s),
+              scale=st.sem(sample_f1s))
+        else:
+            CI = st.norm.interval(alpha=0.95,
+                 loc=np.mean(sample_f1s),
+                 scale=st.sem(sample_f1s))
+        # Get the mean value of the metric
+        f1_mean = np.mean(sample_f1s)
+    # Get point estimate if no bootstrapping
+    else:
+        # get the F1s for all the docs
+        doc_f1s = dset_df.apply(lambda row: calculate_f1(row['preds'],
+                                            row['trips'], check_rels=check_rels,
+                                            sym_rels=sym_rels), axis=1)
+        # Average to get point estimate
+        f1_mean = np.mean(doc_f1s)
+        CI = None
+
+    return f1_mean, CI
+            
 
 
 

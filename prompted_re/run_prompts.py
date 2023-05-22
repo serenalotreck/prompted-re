@@ -6,8 +6,10 @@ Author: Serena G. Lotreck
 import argparse
 from os.path import abspath
 from datasets import load_dataset
-from transformers import pipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
 import yaml
+from evaLuation_utils import calculate_performance
 
 
 def save_preds(full_dset, out_loc, out_prefix):
@@ -49,11 +51,7 @@ def evaluate_preds(full_dset, out_loc, out_prefix):
     """
     eval_dict = {}
     for split, dset in full_dset.items():
-        ## TODO implement eval
-        pass
-    # Make df from eval_dict
-    # Save df
-    # Return the save name
+        f1, CI
 
 
 def format_preds(response):
@@ -66,14 +64,15 @@ def format_preds(response):
     print(response)
 
 
-def format_prompt_make_pred(pipe, dset_split, yaml_data, prompt,
+def format_prompt_make_pred(model, tokenizer, dset_split, yaml_data, prompt,
                             fewshot_example_dict=None):
     """
     For each document in a given split, format the prompt and pass to the LLM
     to get results.
-    
+
     parameters:
-        pipe, HuggingFace TextGenerationPipeline: pipeline with model
+        model, huggingface AutoModelForCausalLM: model to use for inference
+        tokenizer, huggingface AutoTokenizer: tokenizer to use
         dset_split, Huggingface Dataset: splt of the dataset to use
         yaml_data, dict: dictionary of special token and context prompt to use
         prompt, str: Prompt to use. Should be formatted to that the target text
@@ -106,11 +105,18 @@ def format_prompt_make_pred(pipe, dset_split, yaml_data, prompt,
         final_str.replace('<|user|>', yaml_data['user'])
         final_str.replace('<|user-message|>', prompt + doc['text'])
         final_str.replace('<|bot|>', yaml_data['bot'])
-        # Pass to the pipeline
-        response = pipe(final_str, num_return_sequences=1, do_sample=True,
-                        return_full_text=False)
+        if fewshot_example_dict is not None:
+            final_str = examples + final_str
+
+        # Generate predictions
+        inputs = tokenizer(final_str, return_tensors='pt')
+        inputs = inputs.to(0)
+        output = model.generate(inputs['input_ids'])
+        response = tokenizer.decode(output[0].tolist())
+
         # Format the output
         doc_preds = format_preds(response)
+
         # Append to predictions
         preds.append(doc_preds)
 
@@ -137,7 +143,7 @@ def get_chemprot_trips(doc):
         arg2 = doc['relations']['arg1'][i]
         arg2_idx = doc['entities']['id'].index(arg2)
         arg2_txt = doc['entities']['text'][arg2_idx]
-        trip = [arg1_text, label, arg2_text]
+        trip = [arg1_txt, label, arg2_txt]
         trips.append(trip)
 
     return trips
@@ -166,8 +172,8 @@ def process_dset(full_dset, dataset):
                 full_dset[split].add_column('trips', trip_col)
 
 
-def main(model, dataset, prompt_path, special_yaml, out_loc, out_prefix,
-        fewshot_examples, gpu, verbose):
+def main(model, dataset, prompt_path, special_yaml, evaluation_config, out_loc,
+        out_prefix, fewshot_examples, verbose):
 
     # Load the dataset
     verboseprint('\nLoading in dataset...')
@@ -175,13 +181,8 @@ def main(model, dataset, prompt_path, special_yaml, out_loc, out_prefix,
     verboseprint(f'Dataset {dataset} contains the following splits: '
                 f'{full_dset.keys()}')
 
-    # Load in the model
-    verboseprint('\nLoading in the model as a text generation pipeline...')
-    gpu = 0 if gpu else -1
-    pipe = pipeline('text-generation', model=model, device=gpu)
-
     # Load in the prompt
-    verbosprint('\nLoading in the prompt file...')
+    verboseprint('\nLoading in the prompt file...')
     with open(prompt_path) as myf:
         prompt = myf.read()
     print_len = min(len(prompt), 50)
@@ -190,11 +191,29 @@ def main(model, dataset, prompt_path, special_yaml, out_loc, out_prefix,
     # Load the yaml and the fewshot examples
     verboseprint('\nLoading in the special token and context prompt yaml...')
     with open(special_yaml, 'r') as stream:
-        yaml_data = pyyaml.safe_load(stream)
+        yaml_data = yaml.safe_load(stream)
     if fewshot_examples is not None:
         verboseprint('\nLoading fewshot examples...')
         with open(fewshot_examples) as myf:
             fewshot_example_dict = json.load(myf)
+    else: fewshot_example_dict = None
+
+    # Load evaluation config
+    verboseprint('\nLoading in the evaluation config...')
+    with open(evaluation_config) as myf:
+        eval_config = json.load(myf)
+    key_check = [k in eval_config.keys() for k in ['bootstrap',
+                                                'bootstrap_iters', 'check_rels',
+                                                'sym_rels']]
+    assert all(key_check), ('One or more required keys is missing from the '
+                            'evaluation configuration, please try again.')
+
+    # Load in the model
+    verboseprint('\nLoading in the model and tokenizer...')
+    checkpoint = model
+    model = AutoModelForCausalLM.from_pretrained(checkpoint,
+        torch_dtype=torch.float16, device_map='auto')
+    tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 
     # Format dataset to inputs & outputs
     verboseprint('\nFormatting dataset to inputs and outputs...')
@@ -203,8 +222,8 @@ def main(model, dataset, prompt_path, special_yaml, out_loc, out_prefix,
     # Format prompts and make predictions with LLM
     verboseprint('\nFormatting prompts and getting predictions...')
     for split in full_dset.keys():
-        verbosprint(f'On split {split}...')
-        format_prompt_make_pred(pipe, full_dset[split], yaml_data, prompt,
+        verboseprint(f'On split {split}...')
+        format_prompt_make_pred(model, tokenizer, full_dset[split], yaml_data, prompt,
                                             fewshot_example_dict)
 
     # Evaluate predictions
@@ -235,14 +254,14 @@ if __name__ == "__main__":
     parser.add_argument('special_yaml', type=str,
             help='Path to yaml file that specifies special tokens and context '
             'prompt for the given model')
+    parser.add_argument('evaluation_config', type=str,
+            help='Path to a json file specifying the parameters for evaluation')
     parser.add_argument('out_loc', type=str,
             help='Path to save outputs')
     parser.add_argument('out_prefix', type=str,
             help='String to prepend to output files')
     parser.add_argument('-fewshot_examples', type=str,
             help='Path to a file containing fewshot input/output examples')
-    parser.add_argument('--gpu', action='store_true',
-            help='Whether or not a GPU is available to run the models')
     parser.add_argument('--verbose', '-v', action='store_true',
             help='Whether or not to print updates')
 
@@ -251,9 +270,10 @@ if __name__ == "__main__":
     args.prompt_path = abspath(args.prompt_path)
     args.special_yaml = abspath(args.special_yaml)
     args.out_loc = abspath(args.out_loc)
+    args.evaluation_config = abspath(args.evaluation_config)
     if args.fewshot_examples is not None:
         args.fewshot_examples = abspath(args.fewshot_examples)
 
     verboseprint = print if args.verbose else lambda *a, **k: None
 
-    main(**vars(args))    
+    main(**vars(args))
