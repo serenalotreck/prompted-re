@@ -9,7 +9,9 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import yaml
-from evaLuation_utils import calculate_performance
+import json
+from evaluation_utils import calculate_performance
+from collections import defaultdict
 
 
 def save_preds(full_dset, out_loc, out_prefix):
@@ -37,21 +39,37 @@ def save_preds(full_dset, out_loc, out_prefix):
     return save_names
 
 
-def evaluate_preds(full_dset, out_loc, out_prefix):
+def evaluate_preds(full_dset, eval_config, out_loc, out_prefix):
     """
     Evaluate and save model predictions.
 
     parameters:
         full_dset, DatasetDict: dataset with preds
+        eval_config, dict: keys are 'bootstrap', 'bootstrap_iters', 'check_rels',
+            and 'sym_rels'
         out_loc, str: lcoation to save
         out_prefix, str: string to prepend to outputs
 
     returns:
         eval_name, str: path to saved file
     """
-    eval_dict = {}
+    eval_dict = defaultdict(list)
     for split, dset in full_dset.items():
-        f1, CI
+        f1, CI = calculate_performance(dset_split,
+                                    boostrap=eval_config['bootstrap'],
+                                    boostrap_iters=eval_config['bootstrap_iters'],
+                                    check_rels=eval_config['check_rels'],
+                                    sym_rels=eval_config['sym_rels'])
+        eval_dict['split'].append(split)
+        eval_dict['F1'].append(f1)
+        if CI is not None:
+            eval_dict['CI'].append(CI)
+
+    eval_df = pd.DataFrame(eval_dict)
+    eval_name = f'{out_loc}/{out_prefix}_evaluation_metrics.csv'
+    eval_df.to_csv(eval_name, index=False)
+
+    return eval_name
 
 
 def format_preds(response):
@@ -61,6 +79,7 @@ def format_preds(response):
     parameters:
         response, list of dict: responses from text-generation pipeline object
     """
+    ## TODO implement
     print(response)
 
 
@@ -99,19 +118,21 @@ def format_prompt_make_pred(model, tokenizer, dset_split, yaml_data, prompt,
     preds = []
     for doc in dset_split:
         # Add one more user prompt and the doc text
-        final_str = yaml_data['turn_template']
+        final_str = yaml_data['context']
+        final_str += yaml_data['turn_template']
         bot_msg_idx = final_str.index('<|bot-message|>')
         final_str = final_str[:bot_msg_idx]
-        final_str.replace('<|user|>', yaml_data['user'])
-        final_str.replace('<|user-message|>', prompt + doc['text'])
-        final_str.replace('<|bot|>', yaml_data['bot'])
+        final_str = final_str.replace('<|user|>', yaml_data['user'])
+        final_str = final_str.replace('<|user-message|>', prompt + doc['text'])
+        final_str = final_str.replace('<|bot|>', yaml_data['bot'])
         if fewshot_example_dict is not None:
             final_str = examples + final_str
+        print(f'Prompt being passed to the model:\n\n{final_str}\n\n')
 
         # Generate predictions
         inputs = tokenizer(final_str, return_tensors='pt')
         inputs = inputs.to(0)
-        output = model.generate(inputs['input_ids'])
+        output = model.generate(inputs['input_ids'], max_new_tokens=500)
         response = tokenizer.decode(output[0].tolist())
 
         # Format the output
@@ -212,7 +233,7 @@ def main(model, dataset, prompt_path, special_yaml, evaluation_config, out_loc,
     verboseprint('\nLoading in the model and tokenizer...')
     checkpoint = model
     model = AutoModelForCausalLM.from_pretrained(checkpoint,
-        torch_dtype=torch.float16, device_map='auto')
+        torch_dtype=torch.float16, device_map='auto', load_in_8bit=True)
     tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 
     # Format dataset to inputs & outputs
@@ -228,7 +249,7 @@ def main(model, dataset, prompt_path, special_yaml, evaluation_config, out_loc,
 
     # Evaluate predictions
     verboseprint('\nEvaluating predictions....')
-    eval_name = evaluate_preds(full_dset, out_loc, out_prefix)
+    eval_name = evaluate_preds(full_dset, eval_config, out_loc, out_prefix)
     verboseprint(f'Evaluations have been saved to {eval_name}')
 
     # Save predictions
