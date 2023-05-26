@@ -27,7 +27,8 @@ In order to evaluate the models, a `json` file with several keys is required. An
   "bootstrap": true,
   "boostrap_iters": 1000,
   "check_rels": true,
-  "sym_rels": []
+  "sym_rels": [],
+  
 }
 ```
 where `bootstrap` is whether or not to perform bootstrapping to get a confidence interval around the performance estimates, `bootstrap_iters` is the number of iterations to perform (will be ignored if `bootstrap` is `False`, but has to be provided), `check_rels` is whether or not to consider relation labels in evaluation, and `sym_rels` is a list of relation types that should be treated as symmetric.

@@ -46,7 +46,7 @@ def evaluate_preds(full_dset, eval_config, out_loc, out_prefix):
     parameters:
         full_dset, DatasetDict: dataset with preds
         eval_config, dict: keys are 'bootstrap', 'bootstrap_iters', 'check_rels',
-            and 'sym_rels'
+            'sym_rels', and 'filter_type'
         out_loc, str: lcoation to save
         out_prefix, str: string to prepend to outputs
 
@@ -79,7 +79,7 @@ def format_preds(response):
     parameters:
         response, list of dict: responses from text-generation pipeline object
     """
-    ## TODO implement
+    ## TODO implement in formatting_utils.py
     print(response)
 
 
@@ -92,7 +92,7 @@ def format_prompt_make_pred(model, tokenizer, dset_split, yaml_data, prompt,
     parameters:
         model, huggingface AutoModelForCausalLM: model to use for inference
         tokenizer, huggingface AutoTokenizer: tokenizer to use
-        dset_split, Huggingface Dataset: splt of the dataset to use
+        dset_split, Huggingface Dataset: split of the dataset to use
         yaml_data, dict: dictionary of special token and context prompt to use
         prompt, str: Prompt to use. Should be formatted to that the target text
             can be directly appended to the string.
@@ -104,16 +104,12 @@ def format_prompt_make_pred(model, tokenizer, dset_split, yaml_data, prompt,
         None, modifies dataset in place to add predictions
     """
     # Format fewshot examples if there are any
+    examp_str = ''
     if fewshot_example_dict is not None:
-        examples = yaml_data['context']
         for inp, out in zip(fewshot_example_dict['input'], fewshot_example_dict['output']):
-            examp_str = yaml_data['turn_template']
-            examp_str.replace('<|user|>', yaml_data['user'])
-            examp_str.replace('<|user-message|>', inp)
-            examp_str.replace('<|bot|>', yaml_data['bot'])
-            examp_str.replace('<|bot-message|>', out)
-            examples += examp_str
-
+            sub_examp = f'Example Input: {inp}, Example Output: {out}. '
+            examp_str += sub_examp
+            
     # For each document
     preds = []
     for doc in dset_split:
@@ -123,10 +119,12 @@ def format_prompt_make_pred(model, tokenizer, dset_split, yaml_data, prompt,
         bot_msg_idx = final_str.index('<|bot-message|>')
         final_str = final_str[:bot_msg_idx]
         final_str = final_str.replace('<|user|>', yaml_data['user'])
-        final_str = final_str.replace('<|user-message|>', prompt + doc['text'])
+        final_str = final_str.replace('<|user-message|>', prompt)
+        final_str = final_str.replace('<|user_input|>',
+                    yaml_data['user_input'])
+        final_str = final_str.replace('<|user-input-message|>',
+                    doc['text'] + examp_str)
         final_str = final_str.replace('<|bot|>', yaml_data['bot'])
-        if fewshot_example_dict is not None:
-            final_str = examples + final_str
         print(f'Prompt being passed to the model:\n\n{final_str}\n\n')
 
         # Generate predictions
@@ -145,19 +143,26 @@ def format_prompt_make_pred(model, tokenizer, dset_split, yaml_data, prompt,
     dset_split.add_column('preds', preds)
 
 
-def get_chemprot_trips(doc):
+def get_chemprot_trips(doc, filter_type):
     """
     Gets the triples for a given ChemProt dataset document.
 
     parameters:
         doc, dict: one document from the ChemProt dataset
+        filter_type, list of str: relation labels to keep, all others will be
+            removed
 
     returns:
         trips, list of list: triples
+        dropped, int: number of triples dropped form this document
     """
     trips = []
+    dropped = 0
     for i in range(len(doc['relations']['type'])):
         label = doc['relations']['type'][i]
+        if label not in filter_type:
+            dropped += 1
+            continue
         arg1 = doc['relations']['arg1'][i]
         arg1_idx = doc['entities']['id'].index(arg1)
         arg1_txt = doc['entities']['text'][arg1_idx]
@@ -167,10 +172,10 @@ def get_chemprot_trips(doc):
         trip = [arg1_txt, label, arg2_txt]
         trips.append(trip)
 
-    return trips
+    return trips, dropped
 
 
-def process_dset(full_dset, dataset):
+def process_dset(full_dset, dataset, eval_config):
     """
     Processes a relation dataset to have a column containing the unbound correct
     triples for evaluation. This function is likely where dataset idiosyncracies
@@ -179,18 +184,24 @@ def process_dset(full_dset, dataset):
     parameters:
         full_dset, HuggingFace DatasetDict: full dataset to process
         dataset, str: Name of the dataset being processed
+        eval_config, dict: keys are 'bootstrap', 'bootstrap_iters', 'check_rels',
+            'sym_rels', and 'filter_type'
 
     returns:
         None, modifies in place
     """
     # For each split
     for split in full_dset.keys():
-        if split != 'sample':
-            if dataset == 'bigbio/chemprot':
-                trip_col = []
-                for doc in full_dset[split]:
-                    trip_col.append(get_chemprot_trips(doc))
-                full_dset[split].add_column('trips', trip_col)
+        dropped = 0
+        if dataset == 'bigbio/chemprot':
+            trip_col = []
+            for doc in full_dset[split]:
+                doc_trips, doc_dropped = get_chemprot_trips(doc, eval_config['filter_type'])
+                trip_col.append(doc_trips)
+                dropped += doc_dropped
+            full_dset[split].add_column('trips', trip_col)
+        print(f'{dropped} triples were dropped from split "{split}" due to '
+                'excluded relation types')
 
 
 def main(model, dataset, prompt_path, special_yaml, evaluation_config, out_loc,
@@ -225,7 +236,7 @@ def main(model, dataset, prompt_path, special_yaml, evaluation_config, out_loc,
         eval_config = json.load(myf)
     key_check = [k in eval_config.keys() for k in ['bootstrap',
                                                 'bootstrap_iters', 'check_rels',
-                                                'sym_rels']]
+                                                'sym_rels', 'filter_type']]
     assert all(key_check), ('One or more required keys is missing from the '
                             'evaluation configuration, please try again.')
 
@@ -238,7 +249,7 @@ def main(model, dataset, prompt_path, special_yaml, evaluation_config, out_loc,
 
     # Format dataset to inputs & outputs
     verboseprint('\nFormatting dataset to inputs and outputs...')
-    process_dset(full_dset, dataset)
+    process_dset(full_dset, dataset, eval_config)
 
     # Format prompts and make predictions with LLM
     verboseprint('\nFormatting prompts and getting predictions...')
