@@ -1,5 +1,9 @@
 name: prompted
 channels:
+  - huggingface
+  - conda-forge
+  - pytorch
+  - nvidia
   - defaults
 dependencies:
   - huggingface_hub
