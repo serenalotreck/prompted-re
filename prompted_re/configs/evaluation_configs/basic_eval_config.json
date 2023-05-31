@@ -1,0 +1,13 @@
+{
+  "bootstrap": true,
+  "bootstrap_iters": 1000,
+  "check_rels": true,
+  "sym_rels": [],
+  "filter_type": [
+    "CPR:3",
+    "CPR:4",
+    "CPR:5",
+    "CPR:6",
+    "CPR:9"
+  ]
+}

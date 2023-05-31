@@ -1,0 +1,12 @@
+{
+  "CPR:1": "part of",
+  "CPR:2": "regulator",
+  "CPR:3": "upregulator",
+  "CPR:4": "downregulator",
+  "CPR:5": "agonist",
+  "CPR:6": "antagonist",
+  "CPR:7": "modulator",
+  "CPR:8": "cofactor",
+  "CPR:9": "substrate",
+  "CPR:10": "not"
+}

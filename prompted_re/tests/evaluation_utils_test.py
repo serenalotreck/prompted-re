@@ -437,3 +437,48 @@ def test_get_f1_input_cap_whitespace_no_check_rels(cap_whitespace_preds,
 
     assert vals == cap_whitespace_no_check_rels_answer
 
+                ######### GetF1 for no preds or no gold ###########
+
+@pytest.fixture
+def no_preds_preds():
+    return []
+
+@pytest.fixture
+def no_preds_gold():
+    return [['hello', 'REL', 'world'],
+        ['I', 'REL', 'Sparty'],
+        ['green', 'SYMREL', 'blue'],
+        ['how', 'SYMREL', 'you'],
+        ['much', 'SYMREL', 'ado']]
+
+@pytest.fixture
+def no_preds_answer():
+    return 0, 0, 5
+
+@pytest.fixture
+def no_gold_preds():
+    return [['hello', 'REL', 'world'],
+        ['I', 'REL', 'Sparty'],
+        ['green', 'SYMREL', 'blue'],
+        ['how', 'SYMREL', 'you'],
+        ['much', 'SYMREL', 'ado']]
+
+@pytest.fixture
+def no_gold_gold():
+    return []
+
+@pytest.fixture
+def no_gold_answer():
+    return 0, 5, 0
+
+def test_get_f1_no_preds(no_preds_preds, no_preds_gold, no_preds_answer):
+
+    vals = eu.get_f1_input(no_preds_preds, no_preds_gold)
+
+    assert vals == no_preds_answer
+
+def test_get_f1_no_gold(no_gold_preds, no_gold_gold, no_gold_answer):
+
+    vals = eu.get_f1_input(no_gold_preds, no_gold_gold)
+
+    assert vals == no_gold_answer

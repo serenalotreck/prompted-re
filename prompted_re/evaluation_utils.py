@@ -167,59 +167,67 @@ def get_f1_input(preds, gold, check_rels=True, sym_rels=None):
     # Get sym_rels as a list if it was None
     sym_rels = [s.lower() for s in sym_rels] if sym_rels is not None else []
 
-    # Make triple dataframes
-    pred_df = pd.DataFrame(np.array(preds), columns=['E1', 'R', 'E2'])
-    gold_df = pd.DataFrame(np.array(gold), columns=['E1', 'R', 'E2'])
+    # Check if either the gold or the predictions are empty
+    if len(preds) == 0 or len(gold) == 0:
+        tp = 0
+        fp = len(preds)
+        fn = len(gold)
 
-    # Lowercase everything and strip leading/training whitespace
-    for col_name in ['E1', 'R', 'E2']:
-        pred_df[col_name] = pred_df[col_name].str.lower().str.strip()
-        gold_df[col_name] = gold_df[col_name].str.lower().str.strip()
+        return tp, fp, fn
 
-    # Deduplicate
-    orig_lens = [len(pred_df), len(gold_df)]
-    pred_df = dedup_trip_df(pred_df, check_rels, sym_rels)
-    gold_df = dedup_trip_df(gold_df, check_rels, sym_rels)
-    print(f'After deduplication, there are {orig_lens[0] - len(pred_df)} '
-          f'fewer predicted triples, and {orig_lens[1] - len(gold_df)} '
-          'fewer triples in the gold standard.')
-
-    # Check whether we have to go yb rel label or if we can do them all together
-    tp, fp, fn = [0, 0, 0]
-    rel_types = gold_df['R'].unique()
-    in_sym = [r in sym_rels for r in rel_types]
-    # If we don't care about relation label, can do the entire thing at once:
-    if not check_rels:
-        new_tp, new_fp, new_fn = check_rels_symmetrically(pred_df, gold_df, check_rels)
-        tp += new_tp
-        fp += new_fp
-        fn += new_fn
-    # We also can do everything at once if all relation types are symmetrical
-    elif all(in_sym):
-        print('inside all sym')
-        new_tp, new_fp, new_fn = check_rels_symmetrically(pred_df, gold_df, check_rels)
-        tp += new_tp
-        fp += new_fp
-        fn += new_fn
-    # Otherwise, we have to subset by type and perform operations on each subset
     else:
-        for rel_type in rel_types:
-            # Subset
-            pred_sub = pred_df.loc[pred_df['R'] == rel_type]
-            gold_sub = gold_df.loc[gold_df['R'] == rel_type]
-            # Check if the rel type we're on is symmetrical
-            if rel_type in sym_rels:
-                new_tp, new_fp, new_fn = check_rels_symmetrically(pred_sub, gold_sub, check_rels)
-                tp += new_tp
-                fp += new_fp
-                fn += new_fn
-            else:
-                new_tp, new_fp, new_fn = check_rels_asymmetrically(pred_sub, gold_sub)
-                tp += new_tp
-                fp += new_fp
-                fn += new_fn
+        # Make triple dataframes
+        pred_df = pd.DataFrame(np.array(preds), columns=['E1', 'R', 'E2'])
+        gold_df = pd.DataFrame(np.array(gold), columns=['E1', 'R', 'E2'])
+    
+        # Lowercase everything and strip leading/training whitespace
+        for col_name in ['E1', 'R', 'E2']:
+            pred_df[col_name] = pred_df[col_name].str.lower().str.strip()
+            gold_df[col_name] = gold_df[col_name].str.lower().str.strip()
+    
+        # Deduplicate
+        orig_lens = [len(pred_df), len(gold_df)]
+        pred_df = dedup_trip_df(pred_df, check_rels, sym_rels)
+        gold_df = dedup_trip_df(gold_df, check_rels, sym_rels)
+        # print(f'After deduplication, there are {orig_lens[0] - len(pred_df)} '
+        #       f'fewer predicted triples, and {orig_lens[1] - len(gold_df)} '
+        #       'fewer triples in the gold standard.')
+    
+        # Check whether we have to go yb rel label or if we can do them all together
+        tp, fp, fn = [0, 0, 0]
+        rel_types = gold_df['R'].unique()
+        in_sym = [r in sym_rels for r in rel_types]
+        # If we don't care about relation label, can do the entire thing at once:
+        if not check_rels:
+            new_tp, new_fp, new_fn = check_rels_symmetrically(pred_df, gold_df, check_rels)
+            tp += new_tp
+            fp += new_fp
+            fn += new_fn
+        # We also can do everything at once if all relation types are symmetrical
+        elif all(in_sym):
+            new_tp, new_fp, new_fn = check_rels_symmetrically(pred_df, gold_df, check_rels)
+            tp += new_tp
+            fp += new_fp
+            fn += new_fn
+        # Otherwise, we have to subset by type and perform operations on each subset
+        else:
+            for rel_type in rel_types:
+                # Subset
+                pred_sub = pred_df.loc[pred_df['R'] == rel_type]
+                gold_sub = gold_df.loc[gold_df['R'] == rel_type]
+                # Check if the rel type we're on is symmetrical
+                if rel_type in sym_rels:
+                    new_tp, new_fp, new_fn = check_rels_symmetrically(pred_sub, gold_sub, check_rels)
+                    tp += new_tp
+                    fp += new_fp
+                    fn += new_fn
+                else:
+                    new_tp, new_fp, new_fn = check_rels_asymmetrically(pred_sub, gold_sub)
+                    tp += new_tp
+                    fp += new_fp
+                    fn += new_fn
 
-    return tp, fp, fn
+        return tp, fp, fn
 
 
 def calculate_f1(preds, gold, check_rels=True, sym_rels=None):
@@ -253,7 +261,7 @@ def calculate_f1(preds, gold, check_rels=True, sym_rels=None):
     return f1
     
 
-def calculate_performance(dset_split, boostrap=True, boostrap_iters=500,
+def calculate_performance(dset_df, bootstrap=True, bootstrap_iters=500,
                             check_rels=True, sym_rels=None):
     """
     Compute the F1 score of a model on a given dataset. For test sets with fewer
@@ -261,12 +269,12 @@ def calculate_performance(dset_split, boostrap=True, boostrap_iters=500,
     uses the normal distribution.
 
     parameters:
-        dset_split, Huggingface Dataset: a single split of a dataset, with
-            correctly formatted prediction and gold standard columns named
-            'preds' and 'trips' respectively.
+        dset_df, pandas df: rows are documents, must have the columns 'trips'
+            and 'preds', where trips are gold standard and preds are predictions,
+            and they are both formatted as lists of list
         bootstrap, bool: whether or not to bootstrap performance estimate,
             default is True
-        boostrap_iters, int: how many bootstrap samples to pull, default is 500
+        bootstrap_iters, int: how many bootstrap samples to pull, default is 500
         check_rels, bool: whether or not to consider relation label identity,
             default is True
         sym_rels, list of str: relations to treat as symmetric, default is None
@@ -275,24 +283,26 @@ def calculate_performance(dset_split, boostrap=True, boostrap_iters=500,
         f1_mean, float: F1 score
         CI, tuple of float or None: CI if bootstrap=True, else None
     """
-    # Turn dataset into a dataframe to make sampling easier
-    dset_df = pd.DataFrame(dset_split)
-
     # Bootstrap
     if bootstrap:
         sample_f1s = []
         for i in range(bootstrap_iters):
             # Draw sample
             sample = dset_df.sample(n=len(dset_df), replace=True)
+
             # Compute statistic on sample
             # This gets a separate F1 for each document
-            sample_f1 = dset_df.apply(lambda row: calculate_f1(row['preds'],
+            sample_f1 = sample.apply(lambda row: calculate_f1(row['preds'],
                                             row['trips'], check_rels=check_rels,
                                             sym_rels=sym_rels), axis=1)
+
             # Average the F1 for this sample
             sample_f1 = np.mean(sample_f1)
+
             # Add to the sample list
             sample_f1s.append(sample_f1)
+        print(sample_f1s)
+
         # Generate the CI for this metric
         if len(sample_f1s) <= 30:
             CI = st.t.interval(alpha=0.95, df=len(sample_f1s)-1,

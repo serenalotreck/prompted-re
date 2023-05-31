@@ -55,7 +55,8 @@ def evaluate_preds(full_dset, eval_config, out_loc, out_prefix):
     """
     eval_dict = defaultdict(list)
     for split, dset in full_dset.items():
-        f1, CI = calculate_performance(dset_split,
+        split_df = pd.DataFrame(dset)
+        f1, CI = calculate_performance(split_df,
                                     boostrap=eval_config['bootstrap'],
                                     boostrap_iters=eval_config['bootstrap_iters'],
                                     check_rels=eval_config['check_rels'],
@@ -244,7 +245,10 @@ def main(model, dataset, prompt_path, special_yaml, evaluation_config, out_loc,
     verboseprint('\nLoading in the model and tokenizer...')
     checkpoint = model
     model = AutoModelForCausalLM.from_pretrained(checkpoint,
-        torch_dtype=torch.float16, device_map='auto', load_in_8bit=True)
+        torch_dtype=torch.float16,
+        device_map='auto',
+        #load_in_8bit=True # Doesn't work on CentOS 7
+        )
     tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 
     # Format dataset to inputs & outputs
