@@ -17,7 +17,9 @@ def format_dygiepp_df(dygiepp_path, filter_type):
         filter_type, list of str: relation types to keep
 
     returns:
-        dygiepp_df, pandas df: columns are "doc_key", "trips", and "preds
+        dygiepp_df, pandas df: columns are "doc_key", "trips", and "preds"
+        dropped_gold, int: number of rels dropped form gold
+        dropped_pred, int: number of rels dropped from predictions
     """
     # Read in the file
     with jsonlines.open(dygiepp_path) as reader:
@@ -26,7 +28,8 @@ def format_dygiepp_df(dygiepp_path, filter_type):
             dygiepp_dset.append(obj)
 
     # Go through and format
-    dropped = 0
+    dropped_gold = 0
+    dropped_pred = 0
     dset_dict = {'doc_key': [], 'trips': [], 'preds': []}
     for doc in dygiepp_dset:
         doc_key = doc["doc_key"]
@@ -42,7 +45,7 @@ def format_dygiepp_df(dygiepp_path, filter_type):
                     ent2 = ' '.join(ent2)
                 rel_type = rel[4]
                 if rel_type not in filter_type:
-                    dropped += 1
+                    dropped_gold += 1
                     continue
                 rel_list = [ent1, rel_type, ent2]
                 gold_doc_trips.append(rel_list)
@@ -56,7 +59,7 @@ def format_dygiepp_df(dygiepp_path, filter_type):
                     ent2 = ' '.join(ent2)
                 rel_type = rel[4]
                 if rel_type not in filter_type:
-                    dropped += 1
+                    dropped_pred += 1
                     continue
                 rel_list = [ent1, rel_type, ent2]
                 doc_preds.append(rel_list)
@@ -67,5 +70,5 @@ def format_dygiepp_df(dygiepp_path, filter_type):
     # Make df
     dygiepp_df = pd.DataFrame(dset_dict)
 
-    return dygiepp_df, dropped
-        
+    return dygiepp_df, dropped_gold, dropped_pred
+

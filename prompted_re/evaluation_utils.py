@@ -301,7 +301,6 @@ def calculate_performance(dset_df, bootstrap=True, bootstrap_iters=500,
 
             # Add to the sample list
             sample_f1s.append(sample_f1)
-        print(sample_f1s)
 
         # Generate the CI for this metric
         if len(sample_f1s) <= 30:

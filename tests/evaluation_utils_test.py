@@ -7,7 +7,7 @@ import pytest
 import pandas as pd
 from pandas.testing import assert_frame_equal
 import sys
-sys.path.append ('../')
+sys.path.append ('../prompted_re')
 import evaluation_utils as eu
 
 

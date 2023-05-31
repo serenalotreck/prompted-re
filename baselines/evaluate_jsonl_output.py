@@ -16,7 +16,7 @@ def main(dygiepp_path, eval_config):
 
     # Read in eval_config
     verboseprint('\nLoading in the evaluation config...')
-    with open(evaluation_config) as myf:
+    with open(eval_config) as myf:
         eval_config = json.load(myf)
     key_check = [k in eval_config.keys() for k in ['bootstrap',
                                                 'bootstrap_iters', 'check_rels',
@@ -26,8 +26,9 @@ def main(dygiepp_path, eval_config):
 
     # Format the dygiepp dataset
     verboseprint('\nReading in predictions and gold standard...')
-    dset_df, dropped = format_dygiepp_df(dygiepp_path, eval_config['filter_type'])
-    print('{dropped} relations were dropped because their types were not '
+    dset_df, dropped_gold, dropped_preds = format_dygiepp_df(dygiepp_path, eval_config['filter_type'])
+    print(f'{dropped_gold} relations were dropped from gold standard and '
+            f'{dropped_preds} from predictions because their types were not '
             'included in "filter_type"')
 
     # Calculate performance
@@ -40,7 +41,7 @@ def main(dygiepp_path, eval_config):
                                     )
 
     # Print result
-    print('F1: {f1}, CI: {CI}\n\n')
+    print(f'F1: {f1}, CI: {CI}\n\n')
 
 
 if __name__ == "__main__":
@@ -52,10 +53,10 @@ if __name__ == "__main__":
             'predicted_relations fields')
     parser.add_argument('evaluation_config', type=str,
             help='Path to evaluation config file')
-    parser.add-argument('--verbose', '-v', action='store_true',
+    parser.add_argument('--verbose', '-v', action='store_true',
             help='Whether or not to print updates')
 
-    args = parser.arse_args()
+    args = parser.parse_args()
 
     args.dygiepp_path = abspath(args.dygiepp_path)
     args.evaluation_config = abspath(args.evaluation_config)
