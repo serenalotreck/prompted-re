@@ -35,6 +35,7 @@ def format_dygiepp_df(dygiepp_path, filter_type):
         doc_key = doc["doc_key"]
         all_toks = [tok for sent in doc["sentences"] for tok in sent]
         gold_doc_trips = []
+        doc_preds = []
         for i, sent in enumerate(doc["sentences"]):
             for rel in doc["relations"][i]:
                 ent1 = all_toks[rel[0]:rel[1]+1]
@@ -49,7 +50,6 @@ def format_dygiepp_df(dygiepp_path, filter_type):
                     continue
                 rel_list = [ent1, rel_type, ent2]
                 gold_doc_trips.append(rel_list)
-            doc_preds = []
             for rel in doc["predicted_relations"][i]:
                 ent1 = all_toks[rel[0]:rel[1]+1]
                 if isinstance(ent1, list):

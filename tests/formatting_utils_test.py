@@ -41,6 +41,14 @@ def dygiepp_file(tmp_path_factory):
                        [10, 10, 16, 20, "has-slogan"]]],
         'predicted_relations': [[[0, 0, 6, 8, "has-colors"]],
                                 [[10, 10, 13, 14, "has-slogan"]]]
+    },
+    {
+        'doc_key':
+        'doc3',
+        'sentences': [['hello', 'world', 'I', 'am', 'Sparty', '.'],
+                      ['I', 'work', 'at', 'MSU', '.']],
+        'relations': [[[2, 2, 4, 4, "is"]], [[6, 6, 9, 9, "works-at"]]],
+        'predicted_relations': [[], []]
     }]
     fn = tmp_path_factory.mktemp("dygiepp_files") / "preds_and_gold.jsonl"
     with jsonlines.open(fn, 'w') as writer:
@@ -57,12 +65,14 @@ def filter_type():
 @pytest.fixture
 def dygiepp_df():
     dset_dict = {
-        'doc_key': ['doc1', 'doc2'],
+        'doc_key': ['doc1', 'doc2', 'doc3'],
         'trips': [[['I', 'is', 'Sparty'], ['I', 'works-at', 'MSU']],
                   [['MSUs', 'has-slogan', 'Spartans Will'],
-                   ['MSUs', 'has-slogan', 'Go Green , Go White']]],
+                   ['MSUs', 'has-slogan', 'Go Green , Go White']],
+                  [['I', 'is', 'Sparty'], ['I', 'works-at', 'MSU']]],
         'preds': [[['I', 'is', 'Sparty']],
-                  [['MSUs', 'has-slogan', 'Spartans Will']]]
+                  [['MSUs', 'has-slogan', 'Spartans Will']],
+                  []]
     }
     dset_df = pd.DataFrame(dset_dict)
 
@@ -72,11 +82,6 @@ def dygiepp_df():
 def test_format_dygeipp_df(dygiepp_file, filter_type, dygiepp_df):
 
     df, dropped_gold, dropped_pred = fu.format_dygiepp_df(dygiepp_file, filter_type)
-
-    print(df.to_string())
-    print(dygiepp_df.to_string())
-    print(df.dtypes)
-    print(dygiepp_df.dtypes)
 
     assert_frame_equal(df, dygiepp_df)
     assert dropped_gold == 1

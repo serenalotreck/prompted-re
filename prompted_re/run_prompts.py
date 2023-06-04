@@ -126,7 +126,6 @@ def format_prompt_make_pred(model, tokenizer, dset_split, yaml_data, prompt,
         final_str = final_str.replace('<|user-input-message|>',
                     doc['text'] + examp_str)
         final_str = final_str.replace('<|bot|>', yaml_data['bot'])
-        print(f'Prompt being passed to the model:\n\n{final_str}\n\n')
 
         # Generate predictions
         inputs = tokenizer(final_str, return_tensors='pt')

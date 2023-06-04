@@ -6,6 +6,7 @@ Author: Serena G. Lotreck
 import numpy as np
 import pandas as pd
 import scipy.stats as st
+from tqdm import tqdm
 
 
 def safe_div(num, denom):
@@ -286,7 +287,7 @@ def calculate_performance(dset_df, bootstrap=True, bootstrap_iters=500,
     # Bootstrap
     if bootstrap:
         sample_f1s = []
-        for i in range(bootstrap_iters):
+        for i in tqdm(range(bootstrap_iters)):
             # Draw sample
             sample = dset_df.sample(n=len(dset_df), replace=True)
 
