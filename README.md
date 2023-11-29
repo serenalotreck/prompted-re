@@ -1,4 +1,6 @@
 # prompted-re
+**This project has been pivoted and this repository is no longer in use.**
+
 Codebase for applying relation extraction prompts to various Open LLM models and datasets from the huggingface `transformers` and `datasets` libraries.
 
 n-ary relation extraction (RE) is defined as identifying *(subject, predicate, object)* triples from natural language text for some set of predicate labels. The RE task has many downstream applications, such as knowledge graph construction, and cannot be trivially solved by LLMs like GPT-4. This repository explores the application of various open-source LLMs to the RE task.
